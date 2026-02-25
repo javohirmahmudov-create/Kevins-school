@@ -115,7 +115,6 @@ export class AdminStorage {
       if (Object.keys(updates).length > 0) this.updateAdmin(existing.id, updates);
     };
 
-    // Demo admin va o'qituvchi
     ensureAdmin('admin', 'admin123', 'Demo Administrator', 'admin@kevinsacademy.com');
     ensureAdmin('kevin_teacher', 'kevin_0209', 'Kevin Teacher', 'kevin@kevinsacademy.com');
 
@@ -174,11 +173,13 @@ export class AdminStorage {
   }
 
   private getCurrentAdmin(): Admin | null {
+    if (typeof window === 'undefined') return null;
     const currentAdmin = localStorage.getItem('kevins_academy_current_admin');
     return currentAdmin ? JSON.parse(currentAdmin) : null;
   }
 
   private setCurrentAdmin(admin: Admin | null): void {
+    if (typeof window === 'undefined') return;
     if (admin) localStorage.setItem('kevins_academy_current_admin', JSON.stringify(admin));
     else localStorage.removeItem('kevins_academy_current_admin');
   }
@@ -199,6 +200,7 @@ export class AdminStorage {
   }
 
   getAdmins(): Admin[] {
+    if (typeof window === 'undefined') return [];
     const admins = localStorage.getItem('kevins_academy_admins');
     return admins ? JSON.parse(admins) : [];
   }
@@ -227,8 +229,8 @@ export class AdminStorage {
     if (filtered.length === admins.length) return false;
 
     localStorage.setItem('kevins_academy_admins', JSON.stringify(filtered));
-    ['students','groups','materials','scores','attendance','payments','parents'].forEach(key =>
-      localStorage.removeItem(this.getAdminKey(id,key))
+    ['students', 'groups', 'materials', 'scores', 'attendance', 'payments', 'parents'].forEach(key =>
+      localStorage.removeItem(this.getAdminKey(id, key))
     );
 
     if (this.getCurrentAdmin()?.id === id) this.setCurrentAdmin(null);
@@ -249,14 +251,20 @@ export class AdminStorage {
     this.setCurrentAdmin(null);
   }
 
+  getCurrentAdminData(): Admin | null {
+    return this.getCurrentAdmin();
+  }
+
   /** 🔹 Data storage functions (namespaced per admin) */
   saveData(key: string, data: any): void {
+    if (typeof window === 'undefined') return;
     const admin = this.getCurrentAdmin();
     if (!admin) throw new Error('No admin logged in');
     localStorage.setItem(this.getAdminKey(admin.id, key), JSON.stringify(data));
   }
 
   getData(key: string): any {
+    if (typeof window === 'undefined') return null;
     const admin = this.getCurrentAdmin();
     if (!admin) throw new Error('No admin logged in');
     const data = localStorage.getItem(this.getAdminKey(admin.id, key));
@@ -264,20 +272,69 @@ export class AdminStorage {
   }
 
   deleteData(key: string): void {
+    if (typeof window === 'undefined') return;
     const admin = this.getCurrentAdmin();
     if (!admin) throw new Error('No admin logged in');
     localStorage.removeItem(this.getAdminKey(admin.id, key));
   }
 
-  /** 🔹 Singleton: read-only access for any admin without switching */
+  /** 🔹 Read-only access for any admin without switching */
   getDataForAdmin(adminId: string, key: string): any {
+    if (typeof window === 'undefined') return null;
     const data = localStorage.getItem(this.getAdminKey(adminId, key));
     return data ? JSON.parse(data) : null;
   }
 
+  /** 🔹 Find student across all admins by credentials */
+  findStudentByCredentials(
+    username: string,
+    password: string
+  ): { status: 'not_found' | 'inactive' | 'match'; student: Student | null; adminId: string | null } {
+    const admins = this.getAdmins();
+    let lastInactive: { student: Student; adminId: string } | null = null;
+
+    for (const admin of admins) {
+      const students: Student[] = this.getDataForAdmin(admin.id, 'students') || [];
+      const match = students.find(s => s.username === username);
+      if (!match) continue;
+      if (match.password !== password) continue;
+      if (match.status === 'inactive') {
+        lastInactive = { student: match, adminId: admin.id };
+        continue;
+      }
+      return { status: 'match', student: match, adminId: admin.id };
+    }
+
+    if (lastInactive) {
+      return { status: 'inactive', student: lastInactive.student, adminId: lastInactive.adminId };
+    }
+
+    return { status: 'not_found', student: null, adminId: null };
+  }
+
+  /** 🔹 Find parent across all admins by credentials */
+  findParentByCredentials(
+    username: string,
+    password: string
+  ): { status: 'not_found' | 'match'; parent: Parent | null; adminId: string | null } {
+    const admins = this.getAdmins();
+
+    for (const admin of admins) {
+      const parents: Parent[] = this.getDataForAdmin(admin.id, 'parents') || [];
+      const match = parents.find(p => p.username === username);
+      if (!match) continue;
+      if (match.password !== password) continue;
+      return { status: 'match', parent: match, adminId: admin.id };
+    }
+
+    return { status: 'not_found', parent: null, adminId: null };
+  }
+
   /** 🔹 Convenience methods */
   getStudents(): Student[] { return this.getData('students') || []; }
-  saveStudents(students: Student[]): void { this.saveData('students', students); }
+  saveStudents(students: Student[]): void {
+    this.saveData('students', students.map(s => ({ ...s, role: 'student' })));
+  }
 
   getGroups(): Group[] { return this.getData('groups') || []; }
   saveGroups(groups: Group[]): void { this.saveData('groups', groups); }
@@ -295,7 +352,9 @@ export class AdminStorage {
   savePayments(payments: Payment[]): void { this.saveData('payments', payments); }
 
   getParents(): Parent[] { return this.getData('parents') || []; }
-  saveParents(parents: Parent[]): void { this.saveData('parents', parents); }
+  saveParents(parents: Parent[]): void {
+    this.saveData('parents', parents.map(p => ({ ...p, role: 'parent' })));
+  }
 }
 
 /** 🔹 Export singleton instance */
